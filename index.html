@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>🖐 Hand Tracker</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <!-- Загрузочный экран -->
+    <div id="loader">
+        <div class="loader-content">
+            <div class="spinner"></div>
+            <h2>🖐 Hand Tracker</h2>
+            <p id="loader-text">Загрузка модели...</p>
+        </div>
+    </div>
+
+    <!-- Основной контейнер -->
+    <div id="app">
+        <!-- Видео с камеры -->
+        <video id="video" playsinline autoplay muted></video>
+        
+        <!-- Canvas для отрисовки скелета руки -->
+        <canvas id="canvas"></canvas>
+
+        <!-- Панель информации -->
+        <div id="info-panel">
+            <div class="info-row">
+                <span class="label">FPS:</span>
+                <span id="fps" class="value">0</span>
+            </div>
+            <div class="info-row">
+                <span class="label">Руки:</span>
+                <span id="hand-count" class="value">0</span>
+            </div>
+            <div class="info-row">
+                <span class="label">Жест:</span>
+                <span id="gesture" class="value">—</span>
+            </div>
+        </div>
+
+        <!-- Кнопки управления -->
+        <div id="controls">
+            <button id="btn-flip" class="control-btn" title="Переключить камеру">
+                🔄
+            </button>
+            <button id="btn-skeleton" class="control-btn active" title="Скелет">
+                🦴
+            </button>
+            <button id="btn-points" class="control-btn active" title="Точки">
+                ⚪
+            </button>
+            <button id="btn-fill" class="control-btn" title="Заливка">
+                🎨
+            </button>
+        </div>
+    </div>
+
+    <!-- MediaPipe Hands -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+    
+    <script src="js/app.js"></script>
+</body>
+</html>
