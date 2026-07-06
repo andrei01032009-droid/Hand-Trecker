@@ -3,65 +3,281 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>🖐 Hand Tracker</title>
-    <link rel="stylesheet" href="css/style.css">
+    <title>Hand Tracker</title>
+    <style>
+        *{margin:0;padding:0;box-sizing:border-box}
+        html,body{width:100%;height:100%;overflow:hidden;background:#000;font-family:Arial,sans-serif}
+        #video{
+            position:absolute;top:0;left:0;
+            width:100%;height:100%;
+            object-fit:cover;transform:scaleX(-1);
+        }
+        #canvas{
+            position:absolute;top:0;left:0;
+            width:100%;height:100%;
+        }
+        #info{
+            position:absolute;top:10px;left:10px;
+            background:rgba(0,0,0,0.7);
+            color:#0f0;padding:10px 14px;
+            border-radius:12px;font-size:14px;
+            z-index:10;
+        }
+        #info div{margin:3px 0}
+        .val{color:#0f0;font-weight:bold}
+        #status{
+            position:absolute;top:50%;left:50%;
+            transform:translate(-50%,-50%);
+            color:#fff;font-size:18px;
+            text-align:center;z-index:20;
+            background:rgba(0,0,0,0.8);
+            padding:20px 30px;border-radius:16px;
+        }
+        #status.hidden{display:none}
+        #quality{
+            position:absolute;bottom:15px;left:50%;
+            transform:translateX(-50%);
+            display:flex;gap:8px;z-index:10;
+        }
+        #quality button{
+            padding:8px 16px;border:2px solid rgba(255,255,255,0.3);
+            border-radius:20px;background:rgba(0,0,0,0.6);
+            color:#fff;font-size:13px;cursor:pointer;
+        }
+        #quality button.active{
+            border-color:#0f0;background:rgba(0,255,0,0.15);
+            color:#0f0;
+        }
+    </style>
 </head>
 <body>
-    <!-- Загрузочный экран -->
-    <div id="loader">
-        <div class="loader-content">
-            <div class="spinner"></div>
-            <h2>🖐 Hand Tracker</h2>
-            <p id="loader-text">Загрузка модели...</p>
-        </div>
+    <div id="status">⏳ Загрузка...<br><small>5-10 секунд</small></div>
+    <video id="video" playsinline autoplay muted></video>
+    <canvas id="canvas"></canvas>
+    <div id="info">
+        <div>FPS: <span id="fps" class="val">0</span></div>
+        <div>Руки: <span id="hands" class="val">0</span></div>
+        <div>Жест: <span id="gesture" class="val">—</span></div>
+    </div>
+    <div id="quality">
+        <button id="q-fast" class="active" onclick="setQuality(0)">⚡ Быстро</button>
+        <button id="q-balanced" onclick="setQuality(1)">⚖️ Баланс</button>
     </div>
 
-    <!-- Основной контейнер -->
-    <div id="app">
-        <!-- Видео с камеры -->
-        <video id="video" playsinline autoplay muted></video>
-        
-        <!-- Canvas для отрисовки скелета руки -->
-        <canvas id="canvas"></canvas>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+    <script>
+    const video = document.getElementById('video');
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d', { 
+        alpha: true,
+        desynchronized: true,    // ← убирает задержку отрисовки
+        willReadFrequently: false
+    });
+    const statusEl = document.getElementById('status');
+    const fpsEl = document.getElementById('fps');
+    const handsEl = document.getElementById('hands');
+    const gestureEl = document.getElementById('gesture');
 
-        <!-- Панель информации -->
-        <div id="info-panel">
-            <div class="info-row">
-                <span class="label">FPS:</span>
-                <span id="fps" class="value">0</span>
-            </div>
-            <div class="info-row">
-                <span class="label">Руки:</span>
-                <span id="hand-count" class="value">0</span>
-            </div>
-            <div class="info-row">
-                <span class="label">Жест:</span>
-                <span id="gesture" class="value">—</span>
-            </div>
-        </div>
+    // ===== FPS =====
+    let frameCount = 0, lastFpsTime = performance.now(), currentFps = 0;
 
-        <!-- Кнопки управления -->
-        <div id="controls">
-            <button id="btn-flip" class="control-btn" title="Переключить камеру">
-                🔄
-            </button>
-            <button id="btn-skeleton" class="control-btn active" title="Скелет">
-                🦴
-            </button>
-            <button id="btn-points" class="control-btn active" title="Точки">
-                ⚪
-            </button>
-            <button id="btn-fill" class="control-btn" title="Заливка">
-                🎨
-            </button>
-        </div>
-    </div>
+    // ===== ОПТИМИЗАЦИЯ: уменьшенное разрешение камеры =====
+    let camWidth = 320;   // ← было 640, теперь 320
+    let camHeight = 240;  // ← было 480, теперь 240
+    let modelComplexity = 0; // ← 0 = лёгкая модель (было 1)
 
-    <!-- MediaPipe Hands -->
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
-    
-    <script src="js/app.js"></script>
+    // ===== СОЕДИНЕНИЯ =====
+    const CONN = [
+        [0,1],[1,2],[2,3],[3,4],
+        [0,5],[5,6],[6,7],[7,8],
+        [0,9],[9,10],[10,11],[11,12],
+        [0,13],[13,14],[14,15],[15,16],
+        [0,17],[17,18],[18,19],[19,20],
+        [5,9],[9,13],[13,17]
+    ];
+
+    const COL = [
+        '#F66','#F66','#F66','#F66','#F66',
+        '#FE6','#FE6','#FE6','#FE6',
+        '#4DC','#4DC','#4DC','#4DC',
+        '#4BD','#4BD','#4BD','#4BD',
+        '#9CB','#9CB','#9CB','#9CB'
+    ];
+
+    const TIPS = new Set([4,8,12,16,20]);
+
+    // ===== RESIZE =====
+    function resize() {
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+    }
+    resize();
+    window.addEventListener('resize', resize);
+
+    // ===== ЖЕСТ =====
+    function detectGesture(lm) {
+        const f = [];
+        f.push(lm[4].x < lm[3].x);
+        f.push(lm[8].y < lm[6].y);
+        f.push(lm[12].y < lm[10].y);
+        f.push(lm[16].y < lm[14].y);
+        f.push(lm[20].y < lm[18].y);
+        const c = f.filter(Boolean).length;
+        if (c===0) return '✊';
+        if (c===5) return '🖐';
+        if (!f[0]&&f[1]&&!f[2]&&!f[3]&&!f[4]) return '☝️';
+        if (!f[0]&&f[1]&&f[2]&&!f[3]&&!f[4]) return '✌️';
+        if (f[0]&&!f[1]&&!f[2]&&!f[3]&&!f[4]) return '👍';
+        return c+'☝️';
+    }
+
+    // ===== РИСОВАНИЕ (оптимизированное) =====
+    // Используем Path2D и batch-рендеринг для скорости
+
+    function draw(results) {
+        const w = canvas.width, h = canvas.height;
+        ctx.clearRect(0, 0, w, h);
+
+        // FPS
+        frameCount++;
+        const now = performance.now();
+        if (now - lastFpsTime >= 500) {
+            currentFps = Math.round(frameCount * 1000 / (now - lastFpsTime));
+            frameCount = 0;
+            lastFpsTime = now;
+            fpsEl.textContent = currentFps;
+        }
+
+        const ml = results.multiHandLandmarks;
+        if (!ml || ml.length === 0) {
+            handsEl.textContent = '0';
+            gestureEl.textContent = '—';
+            return;
+        }
+        handsEl.textContent = ml.length;
+
+        for (let hi = 0; hi < ml.length; hi++) {
+            const lm = ml[hi];
+
+            // Преобразуем координаты один раз
+            const px = new Float32Array(21);
+            const py = new Float32Array(21);
+            for (let i = 0; i < 21; i++) {
+                px[i] = (1 - lm[i].x) * w;
+                py[i] = lm[i].y * h;
+            }
+
+            // === СКЕЛЕТ (batch по цвету) ===
+            ctx.lineWidth = 3;
+            ctx.lineCap = 'round';
+
+            // Группируем линии по цвету для меньшего числа вызовов
+            let lastColor = '';
+            ctx.beginPath();
+            for (let c = 0; c < CONN.length; c++) {
+                const a = CONN[c][0], b = CONN[c][1];
+                const color = COL[b] || '#fff';
+                if (color !== lastColor) {
+                    if (lastColor) ctx.stroke();
+                    ctx.beginPath();
+                    ctx.strokeStyle = color;
+                    lastColor = color;
+                }
+                ctx.moveTo(px[a], py[a]);
+                ctx.lineTo(px[b], py[b]);
+            }
+            ctx.stroke();
+
+            // === ТОЧКИ ===
+            for (let i = 0; i < 21; i++) {
+                const isTip = TIPS.has(i);
+                const r = isTip ? 6 : 4;
+
+                // Точка
+                ctx.beginPath();
+                ctx.fillStyle = COL[i] || '#fff';
+                ctx.arc(px[i], py[i], r, 0, 6.283);
+                ctx.fill();
+
+                // Белая серединка для кончиков
+                if (isTip) {
+                    ctx.beginPath();
+                    ctx.fillStyle = '#fff';
+                    ctx.arc(px[i], py[i], 2, 0, 6.283);
+                    ctx.fill();
+                }
+            }
+
+            if (hi === 0) gestureEl.textContent = detectGesture(lm);
+        }
+    }
+
+    // ===== MEDIAPIPE HANDS =====
+    let hands, camera;
+
+    function initHands() {
+        hands = new Hands({
+            locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`
+        });
+
+        hands.setOptions({
+            maxNumHands: 1,                    // ← ОДНА рука вместо двух = быстрее
+            modelComplexity: modelComplexity,  // ← 0 = лёгкая модель
+            minDetectionConfidence: 0.6,       // ← чуть ниже = быстрее
+            minTrackingConfidence: 0.4         // ← чуть ниже = быстрее
+        });
+
+        hands.onResults(r => {
+            statusEl.classList.add('hidden');
+            draw(r);
+        });
+    }
+
+    function startCamera() {
+        if (camera) camera.stop();
+
+        camera = new Camera(video, {
+            onFrame: async () => await hands.send({image: video}),
+            width: camWidth,
+            height: camHeight,
+            facingMode: 'user'
+        });
+
+        camera.start().catch(() => {
+            statusEl.innerHTML = '❌ Нет камеры<br><small>Разрешите и обновите</small>';
+        });
+    }
+
+    // ===== ПЕРЕКЛЮЧЕНИЕ КАЧЕСТВА =====
+    function setQuality(level) {
+        document.querySelectorAll('#quality button').forEach(b => b.classList.remove('active'));
+
+        if (level === 0) {
+            // ⚡ Быстро — максимальный FPS
+            camWidth = 320;
+            camHeight = 240;
+            modelComplexity = 0;
+            document.getElementById('q-fast').classList.add('active');
+        } else {
+            // ⚖️ Баланс — лучше качество
+            camWidth = 480;
+            camHeight = 360;
+            modelComplexity = 1;
+            document.getElementById('q-balanced').classList.add('active');
+        }
+
+        statusEl.classList.remove('hidden');
+        statusEl.innerHTML = '🔄 Перезапуск...';
+
+        // Пересоздаём модель с новыми параметрами
+        initHands();
+        startCamera();
+    }
+
+    // ===== ЗАПУСК =====
+    initHands();
+    startCamera();
+    </script>
 </body>
 </html>
